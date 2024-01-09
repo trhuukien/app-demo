@@ -9,37 +9,70 @@ import {
   useBreakpoints,
   Frame,
   Modal,
-  TextContainer
+  FormLayout,
+  TextField,
+  Select,
+  Badge
 } from "@shopify/polaris";
-import {useState, useCallback} from 'react';
 
+import {useState, useCallback, useEffect, useMemo} from 'react';
+import { useActionData, useSubmit  } from "@remix-run/react";
+import { useLoaderData } from "@remix-run/react";
+import { authenticate } from "../shopify.server";
 import {PlusMinor} from '@shopify/polaris-icons';
 
+export const loader = async ({ request }) => {
+  const { admin } = await authenticate.admin(request);
+
+  const response = await admin.graphql(
+    `#graphql
+    query {
+      products(first: 30, reverse: true) {
+        edges {
+          node {
+            id
+            title
+            handle
+            status
+            description
+          }
+        }
+      }
+    }`,
+  );
+  const data = await response.json();
+
+  return data.data.products.edges;
+};
+
+export const action = async ({ request }) => {
+  const { admin } = await authenticate.admin(request);
+
+  const response = await admin.graphql(
+    `#graphql
+    mutation {
+      productCreate(input: {title: "Sweet new product", productType: "Snowboard", vendor: "JadedPixel"}) {
+        product {
+          id
+        }
+      }
+    }`,
+  );
+  const data = await response.json();
+
+  return data;
+};
+
 export default function AdditionalPage() {
-  const products = [
-    {
-      id: '000000001',
-      name: 'Product 1',
-      stock_status: 'Instock'
-    },
-    {
-      id: '000000002',
-      name: 'Product 2',
-      stock_status: 'Instock'
-    },
-    {
-      id: '000000003',
-      name: 'Product 3',
-      stock_status: 'Instock'
-    }
-  ];
+  const products = useLoaderData();
+
   const [active, setActive] = useState(false);
   const [currentProduct, setCurrentProduct] = useState();
-  const handleOpenPopup = (id) => {
+  const handleOpenPopup = useCallback((id) => {
     setActive(!active);
-    const product = products.find(product => product.id === id);
+    const product = products.find(product => product.node.id === id);
     setCurrentProduct(product || undefined);
-  };
+  }, [active]);
 
   return (
     <Page
@@ -55,7 +88,11 @@ export default function AdditionalPage() {
       <Layout>
         <Layout.Section>
           <ProductGrid products={products} handleOpenPopup={handleOpenPopup} />
-          {active && <ProductPopup active={active} currentProduct={currentProduct} handleOpenPopup={handleOpenPopup} />}
+        </Layout.Section>
+        <Layout.Section>
+          {active && (
+            <ProductPopup active={active} currentProduct={currentProduct} handleOpenPopup={handleOpenPopup} />
+          )}
         </Layout.Section>
       </Layout>
     </Page>
@@ -89,15 +126,17 @@ function ProductGrid({products, handleOpenPopup}) {
 function ProductLine({products, handleOpenPopup}) {
   const lines = products.map((item) => {
     return (
-    <IndexTable.Row key={item.id}>
+    <IndexTable.Row key={item.node.id}>
       <IndexTable.Cell>
         <Text variant="bodyMd" fontWeight="bold" as="span">
-          {item.name}
+          {item.node.title}
         </Text>
       </IndexTable.Cell>
-      <IndexTable.Cell>{item.stock_status}</IndexTable.Cell>
       <IndexTable.Cell>
-        <Button onClick={() => handleOpenPopup(item.id)}>Update</Button>
+        <Badge tone={item.node.status === "ACTIVE" ? "success" : "warning"}>{item.node.status}</Badge>
+      </IndexTable.Cell>
+      <IndexTable.Cell>
+        <Button onClick={() => handleOpenPopup(item.node.id)}>Update</Button>
         <Button variant="primary" tone="critical">Delete</Button>
       </IndexTable.Cell>
     </IndexTable.Row>
@@ -108,6 +147,30 @@ function ProductLine({products, handleOpenPopup}) {
 }
 
 function ProductPopup({active, currentProduct, handleOpenPopup}) {
+  const statusOptions = [
+    {label: 'Active', value: 'ACTIVE'},
+    {label: 'Draft', value: 'DRAFT'},
+    {label: 'Archived', value: 'ARCHIVED'}
+  ];
+  const [name, setName] = useState('');
+  const [status, setStatus] = useState('DRAFT');
+  const [description, setDescription] = useState('');
+
+  const handleNameChange = useCallback((value) => setName(value), []);
+  const handleStatusChange = useCallback((value) => setStatus(value), []);
+  const handleDescriptionChange = useCallback((value) => setDescription(value), []);
+
+  useEffect(() => {
+    setName(currentProduct ? currentProduct.node.title : '');
+    setDescription(currentProduct ? currentProduct.node.description : '');
+    setStatus(currentProduct ? currentProduct.node.status : 'DRAFT');
+  }, [currentProduct]);
+
+
+  const actionData = useActionData();
+  const submit = useSubmit();
+  const handleSaveProduct = () => submit({}, { replace: true, method: "POST" });
+
   return (
     <div>
       <Frame>
@@ -115,24 +178,32 @@ function ProductPopup({active, currentProduct, handleOpenPopup}) {
           size="large"
           open={active}
           onClose={handleOpenPopup}
-          title={currentProduct.name}
+          title={currentProduct ? "Updating | " + currentProduct.node.title : "Create new product"}
           primaryAction={{
-            content: 'Add Instagram',
+            content: 'Save',
+            onClick: handleSaveProduct,
             onAction: handleOpenPopup,
           }}
           secondaryActions={[
             {
-              content: 'Learn more',
+              content: 'Cancel',
               onAction: handleOpenPopup,
             },
           ]}
         >
           <Modal.Section>
-            <p>
-              Use Instagram posts to share your products with millions of
-              people. Let shoppers buy from your store without leaving
-              Instagram.
-            </p>
+          <FormLayout>
+            <TextField label="Name" value={name} onChange={handleNameChange} autoComplete="off" />
+            <TextField label="Description" value={description} onChange={handleDescriptionChange} multiline={6} autoComplete="off" />
+            <FormLayout.Group condensed>
+              <Select
+                label="Status"
+                onChange={handleStatusChange}
+                value={status}
+                options={statusOptions}
+              />
+            </FormLayout.Group>
+          </FormLayout>
           </Modal.Section>
         </Modal>
       </Frame>

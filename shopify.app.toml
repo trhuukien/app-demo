@@ -2,7 +2,7 @@
 
 name = "kiz"
 client_id = "b73a018a508bc6692d829e04b596adbd"
-application_url = "https://organisation-jersey-offshore-transcripts.trycloudflare.com"
+application_url = "https://findlaw-closest-sister-play.trycloudflare.com"
 embedded = true
 
 [access_scopes]
@@ -11,9 +11,9 @@ scopes = "write_products"
 
 [auth]
 redirect_urls = [
-  "https://organisation-jersey-offshore-transcripts.trycloudflare.com/auth/callback",
-  "https://organisation-jersey-offshore-transcripts.trycloudflare.com/auth/shopify/callback",
-  "https://organisation-jersey-offshore-transcripts.trycloudflare.com/api/auth/callback"
+  "https://findlaw-closest-sister-play.trycloudflare.com/auth/callback",
+  "https://findlaw-closest-sister-play.trycloudflare.com/auth/shopify/callback",
+  "https://findlaw-closest-sister-play.trycloudflare.com/api/auth/callback"
 ]
 
 [webhooks]
