@@ -12,11 +12,12 @@ import {
   FormLayout,
   TextField,
   Select,
-  Badge
+  Badge,
+  Banner
 } from "@shopify/polaris";
 
-import {useState, useCallback, useEffect, useMemo} from 'react';
-import { useActionData, useSubmit  } from "@remix-run/react";
+import {useState, useCallback, useEffect} from 'react';
+import { useActionData, useNavigation, useSubmit  } from "@remix-run/react";
 import { useLoaderData } from "@remix-run/react";
 import { authenticate } from "../shopify.server";
 import {PlusMinor} from '@shopify/polaris-icons';
@@ -34,7 +35,7 @@ export const loader = async ({ request }) => {
             title
             handle
             status
-            description
+            descriptionHtml
           }
         }
       }
@@ -47,20 +48,82 @@ export const loader = async ({ request }) => {
 
 export const action = async ({ request }) => {
   const { admin } = await authenticate.admin(request);
+  const formData = await request.formData();
 
-  const response = await admin.graphql(
-    `#graphql
-    mutation {
-      productCreate(input: {title: "Sweet new product", productType: "Snowboard", vendor: "JadedPixel"}) {
-        product {
-          id
+  if (formData.get("idDelete")) {
+    const response = await admin.graphql(
+      `#graphql
+      mutation productDelete($input: ProductDeleteInput!) {
+        productDelete(input: $input) {
+          deletedProductId
         }
+      }`,
+      {
+        variables: {
+          input: {
+            id: `${formData.get("idDelete")}`,
+          },
+        },
       }
-    }`,
-  );
-  const data = await response.json();
+    );
 
-  return data;
+    const responseJson = await response.json();
+    return responseJson;
+  } else if (formData.get("id")) { // Update product
+    const response = await admin.graphql(
+      `#graphql
+      mutation populateProduct($input: ProductInput!) {
+        productUpdate(input: $input) {
+          product {
+            id
+            title
+            descriptionHtml
+            status
+          }
+        }
+      }`,
+      {
+        variables: {
+          input: {
+            id: `${formData.get("id")}`,
+            title: `${formData.get("name")}`,
+            descriptionHtml: `${formData.get("descriptionHtml")}`,
+            status: `${formData.get("status")}`,
+          },
+        },
+      }
+    );
+
+    const responseJson = await response.json();
+    return responseJson;
+  } else { // Create product
+    const response = await admin.graphql(
+      `#graphql
+      mutation populateProduct($input: ProductInput!) {
+        productCreate(input: $input) {
+          product {
+            title
+            descriptionHtml
+            status
+          }
+        }
+      }`,
+      {
+        variables: {
+          input: {
+            title: `${formData.get("name")}`,
+            descriptionHtml: `${formData.get("descriptionHtml")}`,
+            status: `${formData.get("status")}`,
+          },
+        },
+      }
+    );
+
+    const responseJson = await response.json();
+    return responseJson;
+  }
+
+  return null;
 };
 
 export default function AdditionalPage() {
@@ -72,7 +135,7 @@ export default function AdditionalPage() {
     setActive(!active);
     const product = products.find(product => product.node.id === id);
     setCurrentProduct(product || undefined);
-  }, [active]);
+  }, [active, products]);
 
   return (
     <Page
@@ -124,6 +187,13 @@ function ProductGrid({products, handleOpenPopup}) {
 }
 
 function ProductLine({products, handleOpenPopup}) {
+  const submit = useSubmit();
+  const handleDeleteProduct = useCallback((id) => {
+    let formData = new FormData();
+    formData.set("idDelete", id);
+    submit(formData, { replace: true, method: "POST" });
+  }, []);
+
   const lines = products.map((item) => {
     return (
     <IndexTable.Row key={item.node.id}>
@@ -137,7 +207,7 @@ function ProductLine({products, handleOpenPopup}) {
       </IndexTable.Cell>
       <IndexTable.Cell>
         <Button onClick={() => handleOpenPopup(item.node.id)}>Update</Button>
-        <Button variant="primary" tone="critical">Delete</Button>
+        <Button onClick={() => handleDeleteProduct(item.node.id)} variant="primary" tone="critical">Delete</Button>
       </IndexTable.Cell>
     </IndexTable.Row>
     )
@@ -154,22 +224,42 @@ function ProductPopup({active, currentProduct, handleOpenPopup}) {
   ];
   const [name, setName] = useState('');
   const [status, setStatus] = useState('DRAFT');
-  const [description, setDescription] = useState('');
+  const [descriptionHtml, setDescriptionHtml] = useState('');
+  const [inValid, setInValid] = useState(false);
 
   const handleNameChange = useCallback((value) => setName(value), []);
   const handleStatusChange = useCallback((value) => setStatus(value), []);
-  const handleDescriptionChange = useCallback((value) => setDescription(value), []);
+  const handleDescriptionHtmlChange = useCallback((value) => setDescriptionHtml(value), []);
 
   useEffect(() => {
     setName(currentProduct ? currentProduct.node.title : '');
-    setDescription(currentProduct ? currentProduct.node.description : '');
+    setDescriptionHtml(currentProduct ? currentProduct.node.descriptionHtml : '');
     setStatus(currentProduct ? currentProduct.node.status : 'DRAFT');
   }, [currentProduct]);
 
-
+  const nav = useNavigation();
   const actionData = useActionData();
   const submit = useSubmit();
-  const handleSaveProduct = () => submit({}, { replace: true, method: "POST" });
+  const handleSaveProduct = () => {
+    if (name === '') {
+      setInValid(true);
+      return;
+    }
+    setInValid(false);
+
+    let formData = new FormData();
+    formData.set("id", currentProduct ? currentProduct.node.id : '');
+    formData.set("name", name);
+    formData.set("descriptionHtml", descriptionHtml);
+    formData.set("status", status);
+    submit(formData, { replace: true, method: "POST" });
+  };
+
+  useEffect(() => {
+    if (nav.state === "loading" && actionData) {
+      handleOpenPopup();
+    }
+  }, [nav.state, actionData]);
 
   return (
     <div>
@@ -181,20 +271,26 @@ function ProductPopup({active, currentProduct, handleOpenPopup}) {
           title={currentProduct ? "Updating | " + currentProduct.node.title : "Create new product"}
           primaryAction={{
             content: 'Save',
-            onClick: handleSaveProduct,
-            onAction: handleOpenPopup,
+            onClick: handleSaveProduct
           }}
           secondaryActions={[
             {
               content: 'Cancel',
-              onAction: handleOpenPopup,
-            },
+              onAction: handleOpenPopup
+            }
           ]}
         >
           <Modal.Section>
+          {inValid && (
+            <Banner
+              title="Please enter name product."
+              tone="warning"
+            />
+          )}
+          
           <FormLayout>
             <TextField label="Name" value={name} onChange={handleNameChange} autoComplete="off" />
-            <TextField label="Description" value={description} onChange={handleDescriptionChange} multiline={6} autoComplete="off" />
+            <TextField label="Description" value={descriptionHtml} onChange={handleDescriptionHtmlChange} multiline={6} autoComplete="off" />
             <FormLayout.Group condensed>
               <Select
                 label="Status"
